@@ -1,13 +1,19 @@
 import numpy as np
 cimport cython
 
+# Routine for making a tilemap of an image
+
+# Lookups sky tile from pixel ra,dec in array of tiles
+# tileidxs is an output array setting tiles found==1
+
 @cython.boundscheck(False)
 @cython.wraparound(False)
 def makeTilemap_inner(double[:,::1] ra_img, double[:,::1] dec_img,
                       int[::1] tile_nr,
                       double[::1] ra_min, double[::1] ra_max,
                       double[::1] dec_min, double[::1] dec_max,
-                      int[:,::1] tilemap):
+                      int[:,::1] tilemap,
+                      int[::1] tileidxs):
 
     cdef int numtiles
     cdef int xw, yw
@@ -16,9 +22,12 @@ def makeTilemap_inner(double[:,::1] ra_img, double[:,::1] dec_img,
     cdef double ra, dec
     cdef int looped
 
-    assert ra_min.shape[0]==ra_max.shape[0]
-    assert dec_min.shape[0]==dec_max.shape[0]
-    assert ra_min.shape[0]==dec_max.shape[0]
+    assert ra_min.shape[0] == ra_max.shape[0]
+    assert dec_min.shape[0] == dec_max.shape[0]
+    assert ra_min.shape[0] == dec_max.shape[0]
+    assert ra_min.shape[0] == tile_nr.shape[0]
+    assert ra_min.shape[0] == tileidxs.shape[0]
+
     assert ra_img.shape[0] == dec_img.shape[0]
     assert ra_img.shape[1] == dec_img.shape[1]
     assert ra_img.shape[0] == tilemap.shape[0]
@@ -49,6 +58,7 @@ def makeTilemap_inner(double[:,::1] ra_img, double[:,::1] dec_img,
 
             if tidx >= 0:
                 tilemap[y,x] = tile_nr[tidx]
+                tileidxs[tidx] = 1
             else:
                 tilemap[y,x] = -1
                 tidx = 0

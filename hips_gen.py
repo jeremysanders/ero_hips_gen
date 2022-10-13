@@ -1,16 +1,23 @@
 #!/usr/bin/env python3
 
 import os
+import warnings
+import glob
+
 import numpy as N
 from astropy.io import fits
 from astropy_healpix import HEALPix
-from astropy.wcs import WCS
+from astropy.wcs import WCS, FITSFixedWarning
 import astropy.units as u
-from astropy.coordinates import SkyCoord
+from astropy.coordinates import SkyCoord, ICRS
 import forkqueue
 
 import hips_hdr
 import tilemap
+
+import pyximport
+pyximport.install()
+import image_poly
 
 rootdir='/he9srv_local/jsanders/ero_hips_gen'
 
@@ -37,7 +44,7 @@ def mkdir(dirname):
     except OSError:
         pass
 
-def extractTiles(norder):
+def extractPixels(norder):
     outroot = os.path.join(rootdir, 'Norder%i' % norder)
     mkdir(outroot)
 
@@ -45,9 +52,10 @@ def extractTiles(norder):
     imgsize = 2**imgorder
     imgidx = makeidximage(imgorder)
 
-    healpix = HEALPix(nside=2**(norder+imgorder), order='nested')
+    healpix = HEALPix(nside=2**(norder+imgorder), order='nested', frame=ICRS())
 
-    def process_tile(base):
+    def process_hp_map(base):
+        print('Processing norder=%i, pix=%i' % (norder, base))
 
         outdir = os.path.join(outroot, 'Dir%i' % (base//10000*10000))
         mkdir(outdir)
@@ -57,27 +65,58 @@ def extractTiles(norder):
         lon = lon.to_value(u.deg)
         lat = lat.to_value(u.deg)
 
-        idxs = tilemap.makeTilemap(lon, lat)
-        data = idxs.astype(N.float32)
+        corners = healpix.boundaries_skycoord(pixidx, step=1)
+
+        data = N.zeros((imgsize, imgsize), dtype=N.float32)
+
+        # get tilemap and list of tiles in map
+        tmap, tiles = tilemap.makeTilemap(lon, lat)
+        for tile in tiles:
+            fn = glob.glob('/he9srv_local/jsanders/hips/expall/*_%06i_*.fits*' % tile)
+            if not fn:
+                continue
+
+            print('Reading', fn[0])
+            fimg = fits.open(fn[0])
+            imgwcs = WCS(fimg[0].header)
+            img = N.ascontiguousarray(fimg[0].data.astype(N.float32))
+            fimg.close()
+
+            seltile = tmap==tile
+            subcorners = corners[seltile.ravel()]
+            xs, ys = imgwcs.world_to_pixel(subcorners.ravel())
+            xs = N.ascontiguousarray(xs.reshape(subcorners.shape).astype(N.float32))
+            ys = N.ascontiguousarray(ys.reshape(subcorners.shape).astype(N.float32))
+
+            # special cython routine to add up pixels in the 4-sided polygons
+            polysums, polynpix = image_poly.image_poly_stats(img, xs, ys)
+            data[seltile] = polysums/polynpix
+
         hdu = fits.PrimaryHDU(data)
 
         h = hips_hdr.Tile2HPX(norder, imgsize)
         h.makeHeader(base, hdu.header)
         ff = fits.HDUList([hdu])
+
         outfname = os.path.join(outdir, 'Npix%i.fits' % base)
         print('Writing', outfname)
         ff.writeto(outfname, overwrite=True)
 
+    pixels = range(12*4**norder)
+
+    # for i in pixels:
+    #     process_hp_map(i)
+
     with forkqueue.ForkQueue(ordered=False, numforks=16, env=locals()) as q:
-        for out in q.process(process_tile, ((i,) for i in range(12*4**norder))):
+        for out in q.process(process_hp_map, ((i,) for i in pixels)):
             pass
 
 def binupImage(img):
     out = img[::2,::2] + img[1::2,::2] + img[::2,1::2] + img[1::2,1::2]
     return out
 
-def binupTiles(norder):
-    """Bin up tiles from higher order to lower one."""
+def binupPixels(norder):
+    """Bin up pixels from higher order to lower one."""
     outroot = os.path.join(rootdir, 'Norder%i' % (norder-1))
     mkdir(outroot)
     inroot = os.path.join(rootdir, 'Norder%i' % norder)
@@ -129,6 +168,8 @@ def binupTiles(norder):
             pass
 
 def main():
+    warnings.simplefilter('ignore', category=FITSFixedWarning)
+
     skyf = fits.open('SKYMAPS.fits')
     d = skyf['SMAPS'].data
     sky_nr = d['SMAPNR']
@@ -144,9 +185,9 @@ def main():
     # for i in range(4,-1,-1):
     #     extractTiles(i)
 
-    extractTiles(4)
+    extractPixels(4)
     for i in range(4,0,-1):
-        binupTiles(i)
+        binupPixels(i)
 
 if __name__ == '__main__':
     main()

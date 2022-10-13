@@ -19,7 +19,10 @@ skyf.close()
 
 def makeTilemap(ra, dec):
 
+    tileidxs = N.zeros(sky_nr.shape, dtype=N.intc)
     tilemap = N.zeros(ra.shape, dtype=N.intc)
-    makeTilemap_inner(ra, dec, sky_nr, sky_ra_min, sky_ra_max, sky_dec_min, sky_dec_max, tilemap)
+    makeTilemap_inner(ra, dec, sky_nr, sky_ra_min, sky_ra_max, sky_dec_min, sky_dec_max, tilemap, tileidxs)
 
-    return tilemap
+    tilenums = sky_nr[N.where(tileidxs)[0]]
+    return tilemap, tilenums
+
