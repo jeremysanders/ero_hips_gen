@@ -18,20 +18,28 @@ import tilemap
 import pyximport
 pyximport.install()
 import image_poly
+import binup
 
-rootdir='/he9srv_local/jsanders/ero_hips_gen'
+outrootdir='/he9srv_local/jsanders/hips/out_img'
+#outrootdir='/he9srv_local/jsanders/hips/out_exp'
+inrootdir='/he9srv_local/jsanders/hips/dr1'
 
-def recuridx(out, y0, x0, base, order):
-    """Recursively number pixels in output image using nested healpix indexing."""
-    if order == 0:
-        out[y0,x0] = base
-    else:
-        recuridx(out, y0*2+1, x0*2+0, base*4+0, order-1)
-        recuridx(out, y0*2+0, x0*2+0, base*4+1, order-1)
-        recuridx(out, y0*2+1, x0*2+1, base*4+2, order-1)
-        recuridx(out, y0*2+0, x0*2+1, base*4+3, order-1)
+infnameglob = 'EXP_010/e?01_%06i_024_Image_c010.fits.gz'
+#infnameglob = 'DET_010/e?01_%06i_024_ExposureMap_c010.fits.gz'
 
 def makeidximage(imgorder=9):
+    """Make an image of length 2**imgorder square with pixels numbered with healpix indexing."""
+
+    def recuridx(out, y0, x0, base, order):
+        """Recursively number pixels in output image using nested healpix indexing."""
+        if order == 0:
+            out[y0,x0] = base
+        else:
+            recuridx(out, y0*2+1, x0*2+0, base*4+0, order-1)
+            recuridx(out, y0*2+0, x0*2+0, base*4+1, order-1)
+            recuridx(out, y0*2+1, x0*2+1, base*4+2, order-1)
+            recuridx(out, y0*2+0, x0*2+1, base*4+3, order-1)
+
     imgnside = 2**imgorder
     idx = N.zeros((imgnside, imgnside), dtype=N.int64)
 
@@ -39,13 +47,21 @@ def makeidximage(imgorder=9):
     return idx
 
 def mkdir(dirname):
+    """Make a directory without error."""
     try:
         os.mkdir(dirname)
     except OSError:
         pass
 
+def delfile(filename):
+    try:
+        os.unlink(filename)
+    except OSError:
+        pass
+    return
+
 def extractPixels(norder):
-    outroot = os.path.join(rootdir, 'Norder%i' % norder)
+    outroot = os.path.join(outrootdir, 'Norder%i' % norder)
     mkdir(outroot)
 
     imgorder = 9
@@ -53,17 +69,27 @@ def extractPixels(norder):
     imgidx = makeidximage(imgorder)
 
     healpix = HEALPix(nside=2**(norder+imgorder), order='nested', frame=ICRS())
+    nmaps = 12*4**norder  # number of maps
 
     def process_hp_map(base):
-        print('Processing norder=%i, pix=%i' % (norder, base))
+        print('Processing norder=%i, pix=%i/%i' % (norder, base, nmaps))
 
         outdir = os.path.join(outroot, 'Dir%i' % (base//10000*10000))
         mkdir(outdir)
+        outfname = os.path.join(outdir, 'Npix%i.fits' % base)
+        delfile(outfname)
 
         pixidx = imgidx + base*(imgsize**2)
         lon, lat = healpix.healpix_to_lonlat(pixidx)
         lon = lon.to_value(u.deg)
         lat = lat.to_value(u.deg)
+
+        # hack to drop any healpix pixels which don't contain DE data
+        coords = SkyCoord(lon, lat, frame='icrs', unit='deg')
+        g_l = coords.transform_to('galactic').l.to_value(u.deg)
+        sel_de = (g_l > 179.94423568) & (g_l <= 359.94423568)
+        if not N.any(sel_de):
+            return
 
         corners = healpix.boundaries_skycoord(pixidx, step=1)
 
@@ -71,12 +97,14 @@ def extractPixels(norder):
 
         # get tilemap and list of tiles in map
         tmap, tiles = tilemap.makeTilemap(lon, lat)
+        totpix = 0
         for tile in tiles:
-            fn = glob.glob('/he9srv_local/jsanders/hips/expall/*_%06i_*.fits*' % tile)
+            fn = glob.glob(os.path.join(
+                inrootdir, '%03i' % (tile%1000), '%03i' % (tile//1000), infnameglob%tile))
             if not fn:
                 continue
 
-            print('Reading', fn[0])
+            #print('Reading', fn[0])
             fimg = fits.open(fn[0])
             imgwcs = WCS(fimg[0].header)
             img = N.ascontiguousarray(fimg[0].data.astype(N.float32))
@@ -92,23 +120,27 @@ def extractPixels(norder):
             polysums, polynpix = image_poly.image_poly_stats(img, xs, ys)
             data[seltile] = polysums/polynpix
 
-        hdu = fits.PrimaryHDU(data)
+            totpix += N.sum(polynpix)
 
-        h = hips_hdr.Tile2HPX(norder, imgsize)
-        h.makeHeader(base, hdu.header)
-        ff = fits.HDUList([hdu])
+        if totpix > 0:
+            data[~sel_de] = N.nan
 
-        outfname = os.path.join(outdir, 'Npix%i.fits' % base)
-        print('Writing', outfname)
-        ff.writeto(outfname, overwrite=True)
+            hdu = fits.PrimaryHDU(data)
 
-    pixels = range(12*4**norder)
+            h = hips_hdr.Tile2HPX(norder, imgsize)
+            h.makeHeader(base, hdu.header)
+            ff = fits.HDUList([hdu])
+
+            #print('Writing', outfname)
+            ff.writeto(outfname)
+
+    maps = range(nmaps)
 
     # for i in pixels:
     #     process_hp_map(i)
 
-    with forkqueue.ForkQueue(ordered=False, numforks=16, env=locals()) as q:
-        for out in q.process(process_hp_map, ((i,) for i in pixels)):
+    with forkqueue.ForkQueue(ordered=False, numforks=80, env=locals()) as q:
+        for out in q.process(process_hp_map, ((i,) for i in maps)):
             pass
 
 def binupImage(img):
@@ -116,43 +148,51 @@ def binupImage(img):
     return out
 
 def binupPixels(norder):
-    """Bin up pixels from higher order to lower one."""
-    outroot = os.path.join(rootdir, 'Norder%i' % (norder-1))
+    """Bin up pixels from higher HIPS order to make a lower one."""
+
+    outroot = os.path.join(outrootdir, 'Norder%i' % (norder-1))
     mkdir(outroot)
-    inroot = os.path.join(rootdir, 'Norder%i' % norder)
+    inroot = os.path.join(outrootdir, 'Norder%i' % norder)
 
     imgorder = 9
     imgsize = 2**imgorder
 
-    def binup_tile(idx):
-        indir = os.path.join(inroot, 'Dir%i' % (idx*4//10000*10000))
+    def readOrZero(fn):
+        if os.path.exists(fn):
+            with fits.open(fn) as f:
+                img = f[0].data
+            return img+0,True # yeah, get rid of big endianness
+        else:
+            img = N.zeros((imgsize,imgsize), dtype=N.float32) + N.nan
+            return img,False
 
-        with fits.open( os.path.join(indir, 'Npix%i.fits' % (idx*4+0)) ) as f:
-            img0 = f[0].data
-        with fits.open( os.path.join(indir, 'Npix%i.fits' % (idx*4+1)) ) as f:
-            img1 = f[0].data
-        with fits.open( os.path.join(indir, 'Npix%i.fits' % (idx*4+2)) ) as f:
-            img2 = f[0].data
-        with fits.open( os.path.join(indir, 'Npix%i.fits' % (idx*4+3)) ) as f:
-            img3 = f[0].data
+    def binup_tile(idx):
+
+        outdir = os.path.join(outroot, 'Dir%i' % (idx//10000*10000))
+        mkdir(outdir)
+        outfname = os.path.join(outdir, 'Npix%i.fits' % idx)
+
+        indir = os.path.join(inroot, 'Dir%i' % (idx*4//10000*10000))
+        img0,e0 = readOrZero(os.path.join(indir, 'Npix%i.fits' % (idx*4+0)))
+        img1,e1 = readOrZero(os.path.join(indir, 'Npix%i.fits' % (idx*4+1)))
+        img2,e2 = readOrZero(os.path.join(indir, 'Npix%i.fits' % (idx*4+2)))
+        img3,e3 = readOrZero(os.path.join(indir, 'Npix%i.fits' % (idx*4+3)))
+
+        if not (e0 or e1 or e2 or e3):
+            delfile(outfname)
+            return
 
         outimg = img0*0
         s = img0.shape[0]
-        img0 = binupImage(img0)
-        img1 = binupImage(img1)
-        img2 = binupImage(img2)
-        img3 = binupImage(img3)
+        img0 = binup.binUp(img0)
+        img1 = binup.binUp(img1)
+        img2 = binup.binUp(img2)
+        img3 = binup.binUp(img3)
 
         outimg[s//2:,:s//2] = img0
         outimg[:s//2,:s//2] = img1
         outimg[s//2:,s//2:] = img2
         outimg[:s//2,s//2:] = img3
-        outimg *= 0.25
-
-        outdir = os.path.join(outroot, 'Dir%i' % (idx//10000*10000))
-        mkdir(outdir)
-
-        outfname = os.path.join(outdir, 'Npix%i.fits' % idx)
 
         print(outfname)
         hdu = fits.PrimaryHDU(outimg.astype(N.float32))
@@ -163,7 +203,7 @@ def binupPixels(norder):
         ff = fits.HDUList([hdu])
         ff.writeto(outfname, overwrite=True)
 
-    with forkqueue.ForkQueue(ordered=False, numforks=1, env=locals()) as q:
+    with forkqueue.ForkQueue(ordered=False, numforks=20, env=locals()) as q:
         for out in q.process(binup_tile, ((i,) for i in range(12*4**(norder-1)))):
             pass
 
@@ -185,8 +225,9 @@ def main():
     # for i in range(4,-1,-1):
     #     extractTiles(i)
 
-    extractPixels(4)
-    for i in range(4,0,-1):
+    maxorder = 6
+    extractPixels(maxorder)
+    for i in range(maxorder,0,-1):
         binupPixels(i)
 
 if __name__ == '__main__':

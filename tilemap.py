@@ -7,13 +7,15 @@ pyximport.install()
 from tilemap_helper import makeTilemap_inner
 import os.path
 
-skyf = fits.open(os.path.join('SKYMAPS.fits'))
+skyf = fits.open(os.path.join('SKYMAPS_052022.fits'))
 d = skyf['SMAPS'].data
-sky_nr = d['SMAPNR'] + 0
-sky_ra_min = d['RA_MIN'] + 0.0
-sky_ra_max = d['RA_MAX'] + 0.0
-sky_dec_min = d['DE_MIN'] + 0.0
-sky_dec_max = d['DE_MAX'] + 0.0
+sky_owner = d['OWNER']
+good = (sky_owner == 0) | (sky_owner == 2)
+sky_nr = d['SRVMAP'][good] + 0
+sky_ra_min = d['RA_MIN'][good] + 0.0
+sky_ra_max = d['RA_MAX'][good] + 0.0
+sky_dec_min = d['DE_MIN'][good] + 0.0
+sky_dec_max = d['DE_MAX'][good] + 0.0
 skyf.close()
 
 
