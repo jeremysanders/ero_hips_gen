@@ -20,12 +20,15 @@ pyximport.install()
 import image_poly
 import binup
 
-outrootdir='/he9srv_local/jsanders/hips/out_img'
+#outrootdir='/he9srv_local/jsanders/hips/out_img'
 #outrootdir='/he9srv_local/jsanders/hips/out_exp'
+outrootdir='/he9srv_local/jsanders/hips/out_rat'
+
 inrootdir='/he9srv_local/jsanders/hips/dr1'
 
-infnameglob = 'EXP_010/e?01_%06i_024_Image_c010.fits.gz'
+#infnameglob = 'EXP_010/e?01_%06i_024_Image_c010.fits.gz'
 #infnameglob = 'DET_010/e?01_%06i_024_ExposureMap_c010.fits.gz'
+infnameglob = 'DET_010/e?01_%06i_024_Rate_c010.fits.gz'
 
 def makeidximage(imgorder=9):
     """Make an image of length 2**imgorder square with pixels numbered with healpix indexing."""
@@ -209,18 +212,6 @@ def binupPixels(norder):
 
 def main():
     warnings.simplefilter('ignore', category=FITSFixedWarning)
-
-    skyf = fits.open('SKYMAPS.fits')
-    d = skyf['SMAPS'].data
-    sky_nr = d['SMAPNR']
-    sky_ra_cen = d['RA_CEN']
-    sky_ra_min = d['RA_MIN']
-    sky_ra_max = d['RA_MAX']
-    sky_de_cen = d['DE_CEN']
-    sky_de_min = d['DE_MIN']
-    sky_de_max = d['DE_MAX']
-    owner = d['OWNER']
-    skyf.close()
 
     # for i in range(4,-1,-1):
     #     extractTiles(i)

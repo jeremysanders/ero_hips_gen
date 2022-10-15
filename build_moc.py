@@ -77,4 +77,4 @@ def build_moc(rootdir, norder, badval=-1e30):
     hdulist = fits.HDUList([fits.PrimaryHDU(), hdu])
     hdulist.writeto(os.path.join(rootdir, 'Moc.fits'), overwrite=True)
 
-build_moc('/he9srv_local/jsanders/hips/out_img', 6, badval=0)
+build_moc('/he9srv_local/jsanders/hips/out_rat', 6, badval=-1e30)
