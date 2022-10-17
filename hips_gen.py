@@ -23,7 +23,7 @@ import binup
 #outrootdir='/he9srv_local/jsanders/hips/out_img'
 #outrootdir='/he9srv_local/jsanders/hips/out_exp'
 #outrootdir='/he9srv_local/jsanders/hips/out_rat'
-outrootdir='/he9srv_local/jsanders/hips/out_img_evt'
+outrootdir='/he9srv_local/jsanders/hips/out_img_evt_2'
 
 inrootdir='/he9srv_local/jsanders/hips/dr1'
 
@@ -120,8 +120,10 @@ def extractPixels(norder, mode='image'):
                     img = N.ascontiguousarray(fimg[0].data.astype(N.float32))
 
                 xs, ys = imgwcs.world_to_pixel(subcorners.ravel())
-                xs = N.ascontiguousarray(xs.reshape(subcorners.shape).astype(N.float32))
-                ys = N.ascontiguousarray(ys.reshape(subcorners.shape).astype(N.float32))
+                xs = N.ascontiguousarray(
+                    xs.reshape(subcorners.shape).astype(N.float32))
+                ys = N.ascontiguousarray(
+                    ys.reshape(subcorners.shape).astype(N.float32))
 
                 # special cython routine to add up pixels in the 4-sided polygons
                 polysums, polynpix = image_poly.image_poly_stats(img, xs, ys)
@@ -134,11 +136,23 @@ def extractPixels(norder, mode='image'):
                     hdu = fevt['EVENTS']
                     evtra = hdu.data['RA']
                     evtdec = hdu.data['DEC']
+                    imgwcs = WCS(fevt[0].header)
 
                 # get number of counts in each pixel
+                xs, ys = imgwcs.world_to_pixel(subcorners.ravel())
+                xs = N.ascontiguousarray(
+                    xs.reshape(subcorners.shape).astype(N.float32))
+                ys = N.ascontiguousarray(
+                    ys.reshape(subcorners.shape).astype(N.float32))
+
+                era_x, edec_y = imgwcs.world_to_pixel(
+                    SkyCoord(evtra, evtdec, unit=u.deg, frame=ICRS))
+                era_x = era_x.astype(N.float32)
+                edec_y = edec_y.astype(N.float32)
+
                 ra = subcorners.ra.to_value(u.deg)
                 dec = subcorners.dec.to_value(u.deg)
-                ncts = image_poly.events_poly_stats(evtra, evtdec, ra, dec, fixup_360=1)
+                ncts = image_poly.events_poly_stats(era_x, edec_y, xs, ys)
 
                 # convert to cts per sq arcsec for healpix pixel
                 data[seltile] = ncts*(1/healpix.pixel_area.to_value(u.arcsec*u.arcsec))
