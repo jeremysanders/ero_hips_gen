@@ -22,13 +22,15 @@ import binup
 
 #outrootdir='/he9srv_local/jsanders/hips/out_img'
 #outrootdir='/he9srv_local/jsanders/hips/out_exp'
-outrootdir='/he9srv_local/jsanders/hips/out_rat'
+#outrootdir='/he9srv_local/jsanders/hips/out_rat'
+outrootdir='/he9srv_local/jsanders/hips/out_img_evt'
 
 inrootdir='/he9srv_local/jsanders/hips/dr1'
 
 #infnameglob = 'EXP_010/e?01_%06i_024_Image_c010.fits.gz'
 #infnameglob = 'DET_010/e?01_%06i_024_ExposureMap_c010.fits.gz'
-infnameglob = 'DET_010/e?01_%06i_024_Rate_c010.fits.gz'
+#infnameglob = 'DET_010/e?01_%06i_024_Rate_c010.fits.gz'
+infnameglob = 'EXP_010/e?01_%06i_024_Image_c010.fits.gz'
 
 def makeidximage(imgorder=9):
     """Make an image of length 2**imgorder square with pixels numbered with healpix indexing."""
@@ -63,7 +65,7 @@ def delfile(filename):
         pass
     return
 
-def extractPixels(norder):
+def extractPixels(norder, mode='image'):
     outroot = os.path.join(outrootdir, 'Norder%i' % norder)
     mkdir(outroot)
 
@@ -75,6 +77,7 @@ def extractPixels(norder):
     nmaps = 12*4**norder  # number of maps
 
     def process_hp_map(base):
+
         print('Processing norder=%i, pix=%i/%i' % (norder, base, nmaps))
 
         outdir = os.path.join(outroot, 'Dir%i' % (base//10000*10000))
@@ -107,23 +110,40 @@ def extractPixels(norder):
             if not fn:
                 continue
 
-            #print('Reading', fn[0])
-            fimg = fits.open(fn[0])
-            imgwcs = WCS(fimg[0].header)
-            img = N.ascontiguousarray(fimg[0].data.astype(N.float32))
-            fimg.close()
-
+            # get coordinates of pixels
             seltile = tmap==tile
             subcorners = corners[seltile.ravel()]
-            xs, ys = imgwcs.world_to_pixel(subcorners.ravel())
-            xs = N.ascontiguousarray(xs.reshape(subcorners.shape).astype(N.float32))
-            ys = N.ascontiguousarray(ys.reshape(subcorners.shape).astype(N.float32))
 
-            # special cython routine to add up pixels in the 4-sided polygons
-            polysums, polynpix = image_poly.image_poly_stats(img, xs, ys)
-            data[seltile] = polysums/polynpix
+            if mode == 'image':
+                with fits.open(fn[0]) as fimg:
+                    imgwcs = WCS(fimg[0].header)
+                    img = N.ascontiguousarray(fimg[0].data.astype(N.float32))
 
-            totpix += N.sum(polynpix)
+                xs, ys = imgwcs.world_to_pixel(subcorners.ravel())
+                xs = N.ascontiguousarray(xs.reshape(subcorners.shape).astype(N.float32))
+                ys = N.ascontiguousarray(ys.reshape(subcorners.shape).astype(N.float32))
+
+                # special cython routine to add up pixels in the 4-sided polygons
+                polysums, polynpix = image_poly.image_poly_stats(img, xs, ys)
+                data[seltile] = polysums/polynpix
+
+                totpix += N.sum(polynpix)
+
+            elif mode == 'events':
+                with fits.open(fn[0]) as fevt:
+                    hdu = fevt['EVENTS']
+                    evtra = hdu.data['RA']
+                    evtdec = hdu.data['DEC']
+
+                # get number of counts in each pixel
+                ra = subcorners.ra.to_value(u.deg)
+                dec = subcorners.dec.to_value(u.deg)
+                ncts = image_poly.events_poly_stats(evtra, evtdec, ra, dec, fixup_360=1)
+
+                # convert to cts per sq arcsec for healpix pixel
+                data[seltile] = ncts*(1/healpix.pixel_area.to_value(u.arcsec*u.arcsec))
+
+                totpix += 1
 
         if totpix > 0:
             data[~sel_de] = N.nan
@@ -142,7 +162,7 @@ def extractPixels(norder):
     # for i in pixels:
     #     process_hp_map(i)
 
-    with forkqueue.ForkQueue(ordered=False, numforks=80, env=locals()) as q:
+    with forkqueue.ForkQueue(ordered=False, numforks=64, env=locals()) as q:
         for out in q.process(process_hp_map, ((i,) for i in maps)):
             pass
 
@@ -217,7 +237,7 @@ def main():
     #     extractTiles(i)
 
     maxorder = 6
-    extractPixels(maxorder)
+    extractPixels(maxorder, mode='events')
     for i in range(maxorder,0,-1):
         binupPixels(i)
 
