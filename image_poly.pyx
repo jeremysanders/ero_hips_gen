@@ -1,6 +1,158 @@
 import numpy as np
 cimport cython
 
+cdef int rintersects(float[4] a, float[4] b):
+    return not(a[2]>b[3] or a[3]<b[2] or a[0]>b[1] or a[1]<b[0])
+
+cdef class KDRangeTree:
+    cdef object _v
+    cdef object _n_v
+    cdef object _n_cutval
+    cdef object _n_left
+    cdef object _n_right
+
+    cdef int root
+    cdef int num
+    cdef int nnodes
+    cdef float[:,::1] v
+    cdef int[::1] n_v
+    cdef float[::1] n_cutval
+    cdef int[::1] n_left
+    cdef int[::1] n_right
+
+    def __cinit__(self, float[:,::1] vals):
+        """Initialize set of points and build tree.
+
+        vals: numpy 2D array (Nx2) of float32.
+        """
+
+        assert vals.shape[1] == 2
+        self.num = vals.shape[0]
+        self.nnodes = 0
+
+        self._v = np.array(vals, dtype=np.float32)
+        self.v = self._v
+
+        self._n_v = np.full(self.num*2, -1, dtype=np.intc)
+        self.n_v = self._n_v
+        self._n_left = np.full(self.num*2, -1, dtype=np.intc)
+        self.n_left = self._n_left
+        self._n_left = np.full(self.num*2, -1, dtype=np.intc)
+        self.n_left = self._n_left
+        self._n_right = np.full(self.num*2, -1, dtype=np.intc)
+        self.n_right = self._n_right
+        self._n_cutval = np.full(self.num*2, np.nan, dtype=np.float32)
+        self.n_cutval = self._n_cutval
+
+        self.root = self.kdtree(0, self.num, 0)
+
+    cdef int makeNode(self):
+        self.nnodes += 1
+        return self.nnodes-1
+
+    @cython.boundscheck(False)
+    @cython.wraparound(False)
+    @cython.initializedcheck(False)
+    cdef int kdtree(self, int start, int length, int depth):
+        cdef int ni, axis, mid
+
+        if length == 0:
+            return -1
+        elif length == 1:
+            ni = self.makeNode()
+            self.n_v[ni] = start
+            return ni
+
+        axis = depth % 2
+
+        # sort on axis
+        idxs = np.argsort(self.v[start:start+length,axis])
+        self._v[start:start+length] = self._v[idxs+start]
+
+        # split on median
+        mid = start + length//2 - 1
+
+        ni = self.makeNode()
+        self.n_cutval[ni] = self.v[mid,axis]
+        self.n_left[ni] = self.kdtree(start, mid-start+1, depth+1)
+        self.n_right[ni] = self.kdtree(mid+1, length-(mid-start)-1, depth+1)
+        return ni
+
+    @cython.boundscheck(False)
+    @cython.wraparound(False)
+    @cython.initializedcheck(False)
+    cdef int addTree(self, int ni, out):
+        if ni < 0:
+            return 0
+
+        if self.n_left[ni]<0 and self.n_right[ni]<0:
+            out.append(self.n_v[ni])
+        else:
+            self.addTree(self.n_left[ni], out)
+            self.addTree(self.n_right[ni], out)
+
+        return 0
+
+    @cython.boundscheck(False)
+    @cython.wraparound(False)
+    @cython.initializedcheck(False)
+    cdef int inner_query(self, int ni, float[4] qrng, float[4] crng, int depth, out):
+
+        cdef float[4] newrng
+
+        if self.n_left[ni] < 0 and self.n_right[ni] < 0:
+            # leaf node
+            if qrng[0]<=self.v[self.n_v[ni],0]<=qrng[1] and qrng[2]<=self.v[self.n_v[ni],1]<=qrng[3]:
+                out.append(self.n_v[ni])
+            return 0
+
+        # entire current range is within range, so add subtrees
+        if ( crng[0] >= qrng[0] and crng[1] <= qrng[1] and
+             crng[2] >= qrng[2] and crng[3] <= qrng[3] ):
+            self.addTree(self.n_left[ni], out)
+            self.addTree(self.n_right[ni], out)
+            return 0
+
+        if self.n_left[ni] >= 0:
+            newrng = crng
+            newrng[(depth%2)*2+1] = self.n_cutval[ni]
+            if rintersects(newrng, qrng):
+                self.inner_query(self.n_left[ni], qrng, newrng, depth+1, out)
+        if self.n_right[ni] >= 0:
+            newrng = crng
+            newrng[(depth%2)*2+0] = self.n_cutval[ni]
+            if rintersects(newrng, qrng):
+                self.inner_query(self.n_right[ni], qrng, newrng, depth+1, out)
+
+        return 0
+
+    def query(self, rng):
+        """Return points within the range given by rng.
+
+        rng: [min_coord0, max_coord0, min_coord1, maxcoord1]
+        returns array of points.
+        """
+
+        cdef int i
+        cdef float[4] qrng, crng
+
+        assert len(rng) == 4
+        for i in range(4):
+            qrng[i] = rng[i]
+
+        out = []
+        crng[1] = np.inf
+        crng[0] = -crng[1]
+        crng[2] = -crng[1]
+        crng[3] = crng[1]
+
+        self.inner_query(self.root, qrng, crng, 0, out)
+        if len(out) == 0:
+            return np.empty((0,2), dtype=np.float32)
+        else:
+            return self._v[np.array(out)]
+
+
 @cython.boundscheck(False)
 @cython.wraparound(False)
 cdef int get_side(float ax, float ay, float bx, float by):
@@ -13,14 +165,6 @@ cdef int get_side(float ax, float ay, float bx, float by):
         return 1
     else:
         return 0
-
-@cython.boundscheck(False)
-@cython.wraparound(False)
-cdef double fixup_x(double x, int fixup):
-    if fixup and x>180:
-        return x-360
-    else:
-        return x
 
 @cython.cdivision(True)
 @cython.boundscheck(False)
@@ -173,13 +317,13 @@ def events_poly_stats(float[::1] evtx not None,
     cdef int side
 
     cdef int ncts
+    cdef float[:,::1] evts_v
 
     assert evtx.shape[0] == evty.shape[0]
     assert px.shape[0]==py.shape[0] and px.shape[1]==py.shape[1]
 
     npolys = px.shape[0]
     npts = px.shape[1]
-    nevts = evtx.shape[0]
 
     assert npts>0
     assert npolys>0
@@ -187,7 +331,9 @@ def events_poly_stats(float[::1] evtx not None,
     ncts_out = np.zeros((npolys,), dtype=np.int32)
     cdef int[::1] ncts_out_v = ncts_out
 
-    cdef int below, above, fixup
+    tree = KDRangeTree(np.column_stack((evty,evtx)))
+
+    cdef int below, above
     for npol in range(npolys):
 
         # find range of polygon
@@ -201,12 +347,14 @@ def events_poly_stats(float[::1] evtx not None,
             miny = min(miny, py[npol,pt])
             maxy = max(maxy, py[npol,pt])
 
+        evts = tree.query([miny, maxy, minx, maxx])
+        evts_v = evts
+        nevts = evts_v.shape[0]
+
         ncts = 0
         for evt in range(nevts):
-            ey = evty[evt]
-            ex = evtx[evt]
-            if ex<minx or ex>maxx or ey<miny or ey>maxy:
-                continue
+            ey = evts_v[evt, 0]
+            ex = evts_v[evt, 1]
 
             dirn = 0
             for pt in range(npts):
