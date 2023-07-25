@@ -166,7 +166,7 @@ def extractPixels(outrootdir, infnameglob, norder, imgorder, mode='image'):
     # for i in pixels:
     #     process_hp_map(i)
 
-    with forkqueue.ForkQueue(ordered=False, numforks=64, env=locals()) as q:
+    with forkqueue.ForkQueue(ordered=False, numforks=128, env=locals()) as q:
         for out in q.process(process_hp_map, ((i,) for i in maps)):
             pass
 
@@ -294,15 +294,55 @@ def main():
     maxorder = 6
     imgorder = 9
 
-    infnameglob = 'EXP_010/e?01_%06i_024_Image_c010.fits.gz'
-    outrootdir = '/hedr_local/erodr/hips/eRASS1_024_Image_c010'
+    outroot = '/hedr_local/erodr/hips'
+    procver = '010'
+    outprefix = 'eRASS1'
+    for band in range(1, 7+1):
 
-    extractPixels(outrootdir, infnameglob, maxorder, imgorder, mode='events')
-    for i in range(maxorder,0,-1):
-        binupPixels(outrootdir, i)
-    ensure0(outrootdir, maxorder, imgorder)
+        # counts and exposure
+        outdirs = []
+        for inchain, insuffix, mode in (
+                ('EXP', f'02{band}_Image', 'events'),
+                ('DET', f'02{band}_ExposureMap', 'image'),
+                ):
+            infnameglob = f'{inchain}_{procver}/e?01_%06i_{insuffix}_c{procver}.fits.gz'
+            outrootdir = f'{outroot}/{outprefix}_{insuffix}_c{procver}'
+            outdirs.append(outrootdir)
 
-    makeAllsky(outrootdir, 3, imgorder)
+            if not os.path.exists(outrootdir):
+                os.makedirs(outrootdir)
+
+                extractPixels(outrootdir, infnameglob, maxorder, imgorder, mode=mode)
+                for i in range(maxorder,0,-1):
+                    binupPixels(outrootdir, i)
+                ensure0(outrootdir, maxorder, imgorder)
+
+                makeAllsky(outrootdir, 3, imgorder)
+
+        # compute rates
+        outrootdir = f'{outroot}/{outprefix}_02{band}_Rate_c{procver}'
+        if not os.path.exists(outrootdir):
+
+            # divide cts and exposure to get rate at max order
+            for fname_cts in glob.iglob(os.path.join(outdirs[0], f'Norder{maxorder}', 'Dir*', 'Npix*.fits')):
+                p = fname_cts.split('/')
+                fname_exp = os.path.join(outdirs[1], '/'.join(p[-3:]))
+                fname_rat = os.path.join(outrootdir, '/'.join(p[-3:]))
+                os.makedirs(os.path.dirname(fname_rat), exist_ok=True)
+
+                print(fname_rat)
+                f1 = fits.open(fname_cts)
+                f2 = fits.open(fname_exp)
+                rat = (f1[0].data / f2[0].data).astype(N.float32)
+                f1[0].data[:,:] = rat
+                f1.writeto(fname_rat, overwrite=True)
+
+            # now make lower orders
+            for i in range(maxorder,0,-1):
+                binupPixels(outrootdir, i)
+            ensure0(outrootdir, maxorder, imgorder)
+            makeAllsky(outrootdir, 3, imgorder)
+
 
 if __name__ == '__main__':
     main()

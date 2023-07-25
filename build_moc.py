@@ -5,6 +5,8 @@
 import os.path
 from astropy.io import fits
 import numpy as N
+import glob
+import forkqueue
 
 def makeFilename(rootdir, pix, order):
     fname = os.path.join(
@@ -53,9 +55,10 @@ def build_moc_inner(rootdir, pix, order, norder, goodpix, badval):
             return False
 
 def build_moc(rootdir, norder, badval=-1e30):
+    print('Building MOC for', rootdir)
     goodpix = []
     for pix in range(12):
-        print(pix)
+        print(rootdir, pix)
         good = build_moc_inner(rootdir, pix, 0, norder, goodpix, badval)
         if good:
             goodpix.append(4*4**0 + pix)
@@ -77,4 +80,16 @@ def build_moc(rootdir, norder, badval=-1e30):
     hdulist = fits.HDUList([fits.PrimaryHDU(), hdu])
     hdulist.writeto(os.path.join(rootdir, 'Moc.fits'), overwrite=True)
 
-build_moc('/he9srv_local/jsanders/hips/out_rat', 6, badval=-1e30)
+def main():
+    maxorder = 6
+    with forkqueue.ForkQueue(ordered=False, numforks=32) as q:
+        args = [(d,maxorder) for d in glob.glob('/hedr_local/erodr/hips/eRASS1_02?_*_c010')]
+        for out in q.process(build_moc, args):
+            pass
+
+    # for indir in glob.glob('/hedr_local/erodr/hips/eRASS1_02?_*_c010'):
+    #     print('Building for', indir)
+    #     build_moc(indir, 7, badval=-1e30)
+
+if __name__ == '__main__':
+    main()
