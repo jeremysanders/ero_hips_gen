@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 
+import math
 import os
 import warnings
 import glob
@@ -20,17 +21,7 @@ pyximport.install()
 import image_poly
 import binup
 
-#outrootdir='/he9srv_local/jsanders/hips/out_img'
-#outrootdir='/he9srv_local/jsanders/hips/out_exp'
-#outrootdir='/he9srv_local/jsanders/hips/out_rat'
-outrootdir='/he9srv_local/jsanders/hips/out_img_evt_2'
-
-inrootdir='/he9srv_local/jsanders/hips/dr1'
-
-#infnameglob = 'EXP_010/e?01_%06i_024_Image_c010.fits.gz'
-#infnameglob = 'DET_010/e?01_%06i_024_ExposureMap_c010.fits.gz'
-#infnameglob = 'DET_010/e?01_%06i_024_Rate_c010.fits.gz'
-infnameglob = 'EXP_010/e?01_%06i_024_Image_c010.fits.gz'
+inrootdir='/hedr_local/erodr/ero_archive/products/survey/public'
 
 def makeidximage(imgorder=9):
     """Make an image of length 2**imgorder square with pixels numbered with healpix indexing."""
@@ -65,11 +56,10 @@ def delfile(filename):
         pass
     return
 
-def extractPixels(norder, mode='image'):
+def extractPixels(outrootdir, infnameglob, norder, imgorder, mode='image'):
     outroot = os.path.join(outrootdir, 'Norder%i' % norder)
     mkdir(outroot)
 
-    imgorder = 9
     imgsize = 2**imgorder
     imgidx = makeidximage(imgorder)
 
@@ -184,7 +174,7 @@ def binupImage(img):
     out = img[::2,::2] + img[1::2,::2] + img[::2,1::2] + img[1::2,1::2]
     return out
 
-def binupPixels(norder):
+def binupPixels(outrootdir, norder):
     """Bin up pixels from higher HIPS order to make a lower one."""
 
     outroot = os.path.join(outrootdir, 'Norder%i' % (norder-1))
@@ -244,6 +234,57 @@ def binupPixels(norder):
         for out in q.process(binup_tile, ((i,) for i in range(12*4**(norder-1)))):
             pass
 
+def ensure0(outrootdir, maxorder, imgorder):
+    """Make sure there is a zero pixel image, as this seems to be checked for by viewers."""
+
+    imgsize = 2**imgorder
+    data = N.zeros((imgsize, imgsize), dtype=N.float32)
+    data[:,:] = N.nan
+
+    def makeZero(order, pixel):
+        zerofn = os.path.join(outrootdir, 'Norder%i' % order, 'Dir%i' % (pixel//10000), 'Npix%i.fits' % pixel)
+        if not os.path.exists(zerofn):
+            hdu = fits.PrimaryHDU(data)
+            h = hips_hdr.Tile2HPX(order, imgsize)
+            h.makeHeader(pixel, hdu.header)
+            ff = fits.HDUList([hdu])
+            print('Writing', zerofn)
+            ff.writeto(zerofn)
+
+    for order in range(maxorder+1):
+        makeZero(order, 0)
+
+    for order in range(4):
+        for pixel in range(12*4**order):
+            makeZero(order, pixel)
+
+def makeAllsky(outrootdir, order, imgorder, binorder=3):
+    print('Making all sky for order', order)
+    npix = 12*4**order
+    xwi = int(math.sqrt(npix))
+    ywi = int(math.ceil(npix / xwi))
+
+    size = 2**(imgorder-binorder)
+    out = N.zeros((ywi*size, xwi*size), dtype=N.float32)
+    out[:,:] = N.nan
+
+    for pix in range(npix):
+        fn = os.path.join(outrootdir, 'Norder%i' % order, 'Dir%i' % (pix//10000), 'Npix%i.fits' % pix)
+        with fits.open(fn) as fin:
+            data = fin[0].data + 0
+        for i in range(binorder):
+            data = binup.binUp(data)
+        xi = pix % xwi
+        yi = pix // xwi
+
+        #print(pix, out.shape[0]-(yi+1)*size,out.shape[0]-yi*size, xi*size,(xi+1)*size)
+        out[out.shape[0]-(yi+1)*size:out.shape[0]-yi*size, xi*size:(xi+1)*size] = data
+
+    outfn = os.path.join(outrootdir, 'Norder%i' % order, 'Allsky.fits')
+    fout = fits.HDUList([fits.PrimaryHDU(out)])
+    print('Writing', outfn)
+    fout.writeto(outfn, overwrite=True)
+
 def main():
     warnings.simplefilter('ignore', category=FITSFixedWarning)
 
@@ -251,9 +292,17 @@ def main():
     #     extractTiles(i)
 
     maxorder = 6
-    extractPixels(maxorder, mode='events')
+    imgorder = 9
+
+    infnameglob = 'EXP_010/e?01_%06i_024_Image_c010.fits.gz'
+    outrootdir = '/hedr_local/erodr/hips/eRASS1_024_Image_c010'
+
+    extractPixels(outrootdir, infnameglob, maxorder, imgorder, mode='events')
     for i in range(maxorder,0,-1):
-        binupPixels(i)
+        binupPixels(outrootdir, i)
+    ensure0(outrootdir, maxorder, imgorder)
+
+    makeAllsky(outrootdir, 3, imgorder)
 
 if __name__ == '__main__':
     main()
