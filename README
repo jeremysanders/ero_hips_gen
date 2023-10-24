@@ -2,8 +2,8 @@ Python scripts used to create the eROSITA HiPS maps.
 
 Written by Jeremy Sanders (2022)
 
-This is provided as-is and needs documentation.
-
+This is provided as-is and needs a lot of documentation. Requires
+cython, numpy, astropy and forkqueue Python modules.
 
 * hips_gen.py
 
