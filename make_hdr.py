@@ -179,8 +179,8 @@ clients.
 
 def main():
     parser = argparse.ArgumentParser(
-        prog='build_moc.py',
-        description='Build a MOC file',
+        prog='make_hdr.py',
+        description='Make a HiPS properties file',
         formatter_class=argparse.ArgumentDefaultsHelpFormatter)
 
     parser.add_argument('root_dir', help='HiPS root directory')
