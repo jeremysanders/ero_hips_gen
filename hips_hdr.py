@@ -53,7 +53,7 @@ class Tile2HPX:
         xy1 = (math.pi/4) * (hD0h + hInD0h / self.nsideTile)
         return xy0, xy1
 
-    def makeHeader(self, tileIpix, hdr):
+    def makeHeader(self, tileIpix, hdr, comments=None):
         centreX, centreY = self.centre(tileIpix)
         centreX *= 180/math.pi
         centreY *= 180/math.pi
@@ -76,6 +76,10 @@ class Tile2HPX:
         hdr['PV2_2'] = 3
         hdr['NPIX'] = tileIpix
         hdr['ORDER'] = self.order
+
+        if comments:
+            for cmt in comments:
+                hdr['COMMENT'] = cmt
 
 """
 from astropy.io import fits

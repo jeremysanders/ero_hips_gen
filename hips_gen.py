@@ -4,6 +4,8 @@ import math
 import os
 import warnings
 import glob
+import argparse
+import datetime
 
 import numpy as N
 from astropy.io import fits
@@ -20,8 +22,6 @@ import pyximport
 pyximport.install()
 import image_poly
 import binup
-
-inrootdir='/hedr_local/erodr/ero_archive/products/survey/public'
 
 def makeidximage(imgorder=9):
     """Make an image of length 2**imgorder square with pixels numbered with healpix indexing."""
@@ -56,7 +56,7 @@ def delfile(filename):
         pass
     return
 
-def extractPixels(outrootdir, infnameglob, norder, imgorder, mode='image'):
+def extractPixels(inrootdir, outrootdir, infnameglob, norder, imgorder, mode='image', numforks=16, comments=None):
     outroot = os.path.join(outrootdir, 'Norder%i' % norder)
     mkdir(outroot)
 
@@ -95,8 +95,9 @@ def extractPixels(outrootdir, infnameglob, norder, imgorder, mode='image'):
         tmap, tiles = tilemap.makeTilemap(lon, lat)
         totpix = 0
         for tile in tiles:
-            fn = glob.glob(os.path.join(
-                inrootdir, '%03i' % (tile%1000), '%03i' % (tile//1000), infnameglob%tile))
+            theglob = os.path.join(
+                inrootdir, '%03i' % (tile%1000), '%03i' % (tile//1000), infnameglob%tile)
+            fn = glob.glob(theglob)
             if not fn:
                 continue
 
@@ -155,18 +156,14 @@ def extractPixels(outrootdir, infnameglob, norder, imgorder, mode='image'):
             hdu = fits.PrimaryHDU(data)
 
             h = hips_hdr.Tile2HPX(norder, imgsize)
-            h.makeHeader(base, hdu.header)
+            h.makeHeader(base, hdu.header, comments=comments)
             ff = fits.HDUList([hdu])
 
             #print('Writing', outfname)
             ff.writeto(outfname)
 
     maps = range(nmaps)
-
-    # for i in pixels:
-    #     process_hp_map(i)
-
-    with forkqueue.ForkQueue(ordered=False, numforks=128, env=locals()) as q:
+    with forkqueue.ForkQueue(ordered=False, numforks=numforks, env=locals()) as q:
         for out in q.process(process_hp_map, ((i,) for i in maps)):
             pass
 
@@ -174,7 +171,7 @@ def binupImage(img):
     out = img[::2,::2] + img[1::2,::2] + img[::2,1::2] + img[1::2,1::2]
     return out
 
-def binupPixels(outrootdir, norder):
+def binupPixels(outrootdir, norder, hdr_comments):
     """Bin up pixels from higher HIPS order to make a lower one."""
 
     outroot = os.path.join(outrootdir, 'Norder%i' % (norder-1))
@@ -221,15 +218,16 @@ def binupPixels(outrootdir, norder):
         outimg[s//2:,s//2:] = img2
         outimg[:s//2,s//2:] = img3
 
-        print(outfname)
+        print('Writing', outfname)
         hdu = fits.PrimaryHDU(outimg.astype(N.float32))
 
         h = hips_hdr.Tile2HPX(norder-1, imgsize)
-        h.makeHeader(idx, hdu.header)
+        h.makeHeader(idx, hdu.header, comments=hdr_comments)
 
         ff = fits.HDUList([hdu])
         ff.writeto(outfname, overwrite=True)
 
+    print(f'Binning up sky tiles from order {norder} to make order {norder-1}')
     with forkqueue.ForkQueue(ordered=False, numforks=20, env=locals()) as q:
         for out in q.process(binup_tile, ((i,) for i in range(12*4**(norder-1)))):
             pass
@@ -259,6 +257,8 @@ def ensure0(outrootdir, maxorder, imgorder):
             makeZero(order, pixel)
 
 def makeAllsky(outrootdir, order, imgorder, binorder=3):
+    """Combine together tiles to make an all sky image."""
+
     print('Making all sky for order', order)
     npix = 12*4**order
     xwi = int(math.sqrt(npix))
@@ -277,7 +277,6 @@ def makeAllsky(outrootdir, order, imgorder, binorder=3):
         xi = pix % xwi
         yi = pix // xwi
 
-        #print(pix, out.shape[0]-(yi+1)*size,out.shape[0]-yi*size, xi*size,(xi+1)*size)
         out[out.shape[0]-(yi+1)*size:out.shape[0]-yi*size, xi*size:(xi+1)*size] = data
 
     outfn = os.path.join(outrootdir, 'Norder%i' % order, 'Allsky.fits')
@@ -286,35 +285,66 @@ def makeAllsky(outrootdir, order, imgorder, binorder=3):
     fout.writeto(outfn, overwrite=True)
 
 def main():
+    parser = argparse.ArgumentParser(
+        prog='hips_gen.py',
+        description='Generate eROSITA FITS count, exposure and rate HiPS maps',
+        formatter_class=argparse.ArgumentDefaultsHelpFormatter)
+
+    parser.add_argument('--max-order', default=6, type=int, help='Maximum HiPS order to generate')
+    parser.add_argument('--img-order', default=9, type=int, help='Order of generated images')
+    parser.add_argument('--img-name', default='Image', help='Name of input counts event files')
+    parser.add_argument('--exp-name', default='ExposureMap', help='Name of input exposure files')
+    parser.add_argument('--proc-ver', default='030', help='Input processing version')
+    parser.add_argument('--bands', default='1234', help='Bands to process')
+    parser.add_argument('--prefix', default='eROSITA', help='Output directory prefix')
+    parser.add_argument('--survey', default='e01', help='Survey to process, e.g. e01, s04')
+    parser.add_argument('--procs', default=8, type=int, help='Number of processes')
+
+    parser.add_argument('in_root', help='Input root data archive')
+    parser.add_argument('output_root', help='Output root directory')
+
+    args = parser.parse_args()
+
+    # get rid of lots of annoying FITS warnings
     warnings.simplefilter('ignore', category=FITSFixedWarning)
 
-    # for i in range(4,-1,-1):
-    #     extractTiles(i)
+    maxorder = args.max_order
+    imgorder = args.img_order
+    procver = args.proc_ver
+    outroot = args.output_root
+    inroot = args.in_root
+    outprefix = args.prefix
+    bands = args.bands
+    survey = args.survey
 
-    maxorder = 6
-    imgorder = 9
+    hdr_comments = [
+        'Generated by hips_gen.py, https://github.com/jeremysanders/ero_hips_gen',
+        'on '+ datetime.datetime.now().isoformat(),
+        'arguments used:',]
 
-    outroot = '/hedr_local/erodr/hips'
-    procver = '010'
-    outprefix = 'eRASS1'
-    for band in range(1, 7+1):
+    for kwd in sorted(vars(args)):
+        hdr_comments.append(f'  {kwd}: {getattr(args, kwd)}')
+
+    for band in bands:
 
         # counts and exposure
         outdirs = []
         for inchain, insuffix, mode in (
-                ('EXP', f'02{band}_Image', 'events'),
-                ('DET', f'02{band}_ExposureMap', 'image'),
+                ('EXP', f'02{band}_{args.img_name}', 'events'),
+                ('DET', f'02{band}_{args.exp_name}', 'image'),
                 ):
-            infnameglob = f'{inchain}_{procver}/e?01_%06i_{insuffix}_c{procver}.fits.gz'
+            infnameglob = f'{inchain}_{procver}/{survey[0]}?{survey[1:]}_%06i_{insuffix}_c{procver}.fits*'
             outrootdir = f'{outroot}/{outprefix}_{insuffix}_c{procver}'
             outdirs.append(outrootdir)
 
             if not os.path.exists(outrootdir):
                 os.makedirs(outrootdir)
 
-                extractPixels(outrootdir, infnameglob, maxorder, imgorder, mode=mode)
+                extractPixels(
+                    inroot, outrootdir, infnameglob, maxorder, imgorder, mode=mode,
+                    numforks=args.procs, comments=hdr_comments)
                 for i in range(maxorder,0,-1):
-                    binupPixels(outrootdir, i)
+                    binupPixels(outrootdir, i, hdr_comments)
                 ensure0(outrootdir, maxorder, imgorder)
 
                 makeAllsky(outrootdir, 3, imgorder)
@@ -339,10 +369,9 @@ def main():
 
             # now make lower orders
             for i in range(maxorder,0,-1):
-                binupPixels(outrootdir, i)
+                binupPixels(outrootdir, i, hdr_comments)
             ensure0(outrootdir, maxorder, imgorder)
             makeAllsky(outrootdir, 3, imgorder)
-
 
 if __name__ == '__main__':
     main()
