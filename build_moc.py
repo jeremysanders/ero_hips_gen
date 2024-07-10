@@ -2,6 +2,7 @@
 
 # Build a Moc.fits file for a HiPS survey
 
+import argparse
 import os.path
 from astropy.io import fits
 import numpy as N
@@ -14,8 +15,14 @@ def makeFilename(rootdir, pix, order):
     return fname
 
 def build_moc_inner(rootdir, pix, order, norder, goodpix, badval):
-    """norder = norder of directories.
-    maxnorder = max norder to build moc
+    """
+    Recursively compute whether a pixel has data, but going up the hierarchy
+
+    order=current order
+    norder=smallest order
+    pix=pixel number
+    goodpix=list to contain good pixels
+    badval=bad value in pixel
     """
 
     fname = makeFilename(rootdir, pix, order)
@@ -76,20 +83,38 @@ def build_moc(rootdir, norder, badval=-1e30):
     hdr['PIXTYPE'] = 'HEALPIX'
     hdr['MOCORDER'] = norder
     hdr['MOCTYPE'] = 'IMAGE'
-    hdr['MOCTOOL'] = 'build_moc.py v0.1, Jeremy Sanders, MPE'
+    hdr['MOCTOOL'] = 'build_moc.py v0.2, Jeremy Sanders, MPE'
     hdulist = fits.HDUList([fits.PrimaryHDU(), hdu])
-    hdulist.writeto(os.path.join(rootdir, 'Moc.fits'), overwrite=True)
+
+    outfn = os.path.join(rootdir, 'Moc.fits')
+    print('Writing', outfn)
+    hdulist.writeto(outfn, overwrite=True)
 
 def main():
-    maxorder = 6
-    with forkqueue.ForkQueue(ordered=False, numforks=32) as q:
-        args = [(d,maxorder) for d in glob.glob('/hedr_local/erodr/hips/eRASS1_02?_*_c010')]
-        for out in q.process(build_moc, args):
-            pass
 
-    # for indir in glob.glob('/hedr_local/erodr/hips/eRASS1_02?_*_c010'):
-    #     print('Building for', indir)
-    #     build_moc(indir, 7, badval=-1e30)
+    parser = argparse.ArgumentParser(
+        prog='build_moc.py',
+        description='Build a MOC file',
+        formatter_class=argparse.ArgumentDefaultsHelpFormatter)
+
+    parser.add_argument('--procs', default=8, type=int, help='Number of processes')
+    parser.add_argument('root_dir', help='HiPS root directory')
+
+    args = parser.parse_args()
+
+    rootdir = args.root_dir
+
+    maxorder = max([
+        int(os.path.basename(x)[6:])
+        for x in glob.glob(os.path.join(rootdir, 'Norder*'))])
+
+    build_moc(rootdir, maxorder)
+
+    # maxorder = 6
+    # with forkqueue.ForkQueue(ordered=False, numforks=32) as q:
+    #     args = [(d,maxorder) for d in glob.glob('/hedr_local/erodr/hips/eRASS1_02?_*_c010')]
+    #     for out in q.process(build_moc, args):
+    #         pass
 
 if __name__ == '__main__':
     main()
