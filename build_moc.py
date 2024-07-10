@@ -97,7 +97,6 @@ def main():
         description='Build a MOC file',
         formatter_class=argparse.ArgumentDefaultsHelpFormatter)
 
-    parser.add_argument('--procs', default=8, type=int, help='Number of processes')
     parser.add_argument('root_dir', help='HiPS root directory')
 
     args = parser.parse_args()

@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 
 from astropy.io import fits
+import argparse
 import re
 import glob
 import numpy as N
@@ -40,17 +41,19 @@ def getPixelViewRange(indir):
     percs = N.percentile(alldata, [0, 0.01, 0.1, 1, 95, 99, 99.5, 99.75, 99.8, 99.9, 99.99]) 
     return percs[2], percs[8]
 
-def process(indir):
+def process(indir, procs):
     ranges = {}
+    maxorder = max([
+        int(os.path.basename(x)[6:])
+        for x in glob.glob(os.path.join(indir, 'Norder*'))])
 
-    maxorder = 6
     formats = "fits png"
     for order in range(3, maxorder+1):
         args = ((f,) for f in glob.iglob(os.path.join(indir, f'Norder{order}', 'Dir*', 'Npix*.fits')))
 
         minord = N.inf
         maxord = -N.inf
-        with forkqueue.ForkQueue(numforks=16, ordered=False) as q:
+        with forkqueue.ForkQueue(numforks=procs, ordered=False) as q:
             for minv, maxv in q.process(getMinMax, args):
                 if N.isfinite(minv):
                     minord = min(minord, minv)
@@ -117,10 +120,9 @@ hips_creation_date   = 2019-05-27T17:24Z
 #____FOR_COMPATIBILITY_WITH_OLD_HIPS_CLIENTS____
 label                = { title }
 coordsys             = C
-maxOrder             = 6
+maxOrder             = { maxorder }
 format               = { formats }
 '''
-
 
     propfname = os.path.join(indir, 'properties')
     print('Writing', propfname)
@@ -176,8 +178,20 @@ clients.
         fout.write(html)
 
 def main():
-    for d in sorted(glob.glob('/hedr_local/erodr/hips/eRASS1_02?_*_c010')):
-        process(d)
+    parser = argparse.ArgumentParser(
+        prog='build_moc.py',
+        description='Build a MOC file',
+        formatter_class=argparse.ArgumentDefaultsHelpFormatter)
+
+    parser.add_argument('root_dir', help='HiPS root directory')
+    parser.add_argument('--procs', default=8, type=int, help='Number of processes')
+
+    args = parser.parse_args()
+
+    process(args.root_dir, args.procs)
+
+    # for d in sorted(glob.glob('/hedr_local/erodr/hips/eRASS1_02?_*_c010')):
+    #     process(d)
         
 if __name__ == '__main__':
     main()
