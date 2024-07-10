@@ -232,7 +232,7 @@ def binupPixels(outrootdir, norder, hdr_comments):
         for out in q.process(binup_tile, ((i,) for i in range(12*4**(norder-1)))):
             pass
 
-def ensure0(outrootdir, maxorder, imgorder):
+def ensure0(outrootdir, maxorder, imgorder, hdr_comments):
     """Make sure there is a zero pixel image, as this seems to be checked for by viewers."""
 
     imgsize = 2**imgorder
@@ -244,7 +244,7 @@ def ensure0(outrootdir, maxorder, imgorder):
         if not os.path.exists(zerofn):
             hdu = fits.PrimaryHDU(data)
             h = hips_hdr.Tile2HPX(order, imgsize)
-            h.makeHeader(pixel, hdu.header)
+            h.makeHeader(pixel, hdu.header, comments=hdr_comments)
             ff = fits.HDUList([hdu])
             print('Writing', zerofn)
             ff.writeto(zerofn)
@@ -370,7 +370,7 @@ def main():
             # now make lower orders
             for i in range(maxorder,0,-1):
                 binupPixels(outrootdir, i, hdr_comments)
-            ensure0(outrootdir, maxorder, imgorder)
+            ensure0(outrootdir, maxorder, imgorder, hdr_comments)
             makeAllsky(outrootdir, 3, imgorder)
 
 if __name__ == '__main__':
