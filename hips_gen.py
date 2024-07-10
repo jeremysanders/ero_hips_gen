@@ -345,7 +345,7 @@ def main():
                     numforks=args.procs, comments=hdr_comments)
                 for i in range(maxorder,0,-1):
                     binupPixels(outrootdir, i, hdr_comments)
-                ensure0(outrootdir, maxorder, imgorder)
+                ensure0(outrootdir, maxorder, imgorder, hdr_comments)
 
                 makeAllsky(outrootdir, 3, imgorder)
 
