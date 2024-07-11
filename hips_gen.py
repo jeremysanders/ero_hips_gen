@@ -350,7 +350,7 @@ def main():
                 makeAllsky(outrootdir, 3, imgorder)
 
         # compute rates
-        outrootdir = f'{outroot}/{outprefix}_02{band}_Rate_c{procver}'
+        outrootdir = f'{outroot}/{outprefix}_{survey}_02{band}_Rate_c{procver}'
         if not os.path.exists(outrootdir):
 
             # divide cts and exposure to get rate at max order
