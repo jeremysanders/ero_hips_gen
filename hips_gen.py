@@ -334,7 +334,7 @@ def main():
                 ('DET', f'02{band}_{args.exp_name}', 'image'),
                 ):
             infnameglob = f'{inchain}_{procver}/{survey[0]}?{survey[1:]}_%06i_{insuffix}_c{procver}.fits*'
-            outrootdir = f'{outroot}/{outprefix}_{insuffix}_c{procver}'
+            outrootdir = f'{outroot}/{outprefix}_{survey}_{insuffix}_c{procver}'
             outdirs.append(outrootdir)
 
             if not os.path.exists(outrootdir):
