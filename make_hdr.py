@@ -2,6 +2,7 @@
 
 from astropy.io import fits
 import argparse
+import datetime
 import re
 import glob
 import numpy as N
@@ -24,7 +25,7 @@ def getMinMax(fname):
 def getPixelViewRange(indir):
     # very bright things
     exclude = set([591, 612, 590, 613, 480, 377, 693])
-    
+
     alldata = []
     for fname in glob.iglob(os.path.join(indir, 'Norder3', 'Dir*', 'Npix*.fits')):
         num = int(re.search('Npix([0-9]+).fits', fname).group(1))
@@ -38,7 +39,7 @@ def getPixelViewRange(indir):
             alldata.append(valid)
         f.close()
     alldata = N.concatenate(alldata)
-    percs = N.percentile(alldata, [0, 0.01, 0.1, 1, 95, 99, 99.5, 99.75, 99.8, 99.9, 99.99]) 
+    percs = N.percentile(alldata, [0, 0.01, 0.1, 1, 95, 99, 99.5, 99.75, 99.8, 99.9, 99.99])
     return percs[2], percs[8]
 
 def process(indir, procs):
@@ -71,7 +72,8 @@ def process(indir, procs):
     initial_dec = -48.28904083
     initial_fov = 180
     title = os.path.basename(indir)
-    
+
+    isodatetime = datetime.datetime.now().isoformat()
     proptext = \
 f'''hips_initial_fov     = { initial_fov }
 hips_initial_ra      = { initial_ra }
@@ -104,7 +106,7 @@ hips_pixel_cut       = { low } { high }
 #em_max              = Stop in spectral coordinates in meters
 hips_builder         = hips_gen.py, written by Jeremy Sanders
 hips_version         = 1.4
-hips_release_date    = 2022-04-01T12:00Z
+hips_release_date    = { isodatetime }
 hips_frame           = equatorial
 hips_order           = {maxorder}
 hips_order_min       = 0
@@ -116,7 +118,7 @@ s_pixel_scale        = 0.0011111111111111111
 dataproduct_type     = image
 moc_sky_fraction     = 0.5
 hips_estsize         = 55289513
-hips_creation_date   = 2019-05-27T17:24Z
+hips_creation_date   = { isodatetime }
 #____FOR_COMPATIBILITY_WITH_OLD_HIPS_CLIENTS____
 label                = { title }
 coordsys             = C
@@ -192,7 +194,6 @@ def main():
 
     # for d in sorted(glob.glob('/hedr_local/erodr/hips/eRASS1_02?_*_c010')):
     #     process(d)
-        
+
 if __name__ == '__main__':
     main()
-    
