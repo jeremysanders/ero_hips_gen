@@ -330,9 +330,9 @@ def main():
     for band in bands:
 
         todo = []
-        if 'EXP' in products:
-            todo.append( ('EXP', f'02{band}_{args.img_name}', 'events') )
         if 'IMG' in products:
+            todo.append( ('EXP', f'02{band}_{args.img_name}', 'events') )
+        if 'EXP' in products:
             todo.append( ('DET', f'02{band}_{args.exp_name}', 'image') )
 
         # counts and exposure
