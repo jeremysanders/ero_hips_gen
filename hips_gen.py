@@ -356,14 +356,17 @@ def main():
                 makeAllsky(outrootdir, 3, imgorder)
 
         # compute rates
-        outrootdir = f'{outroot}/{outprefix}_{survey}_02{band}_Rate_c{procver}'
-        if not os.path.exists(outrootdir) and 'RAT' in products:
+        ratrootdir = f'{outroot}/{outprefix}_{survey}_02{band}_Rate_c{procver}'
+        ctsrootdir = f'{outroot}/{outprefix}_{survey}_02{band}_{args.img_name}_c{procver}'
+        exprootdir = f'{outroot}/{outprefix}_{survey}_02{band}_{args.exp_name}_c{procver}'
 
-            # divide cts and exposure to get rate at max order
-            for fname_cts in glob.iglob(os.path.join(outdirs[0], f'Norder{maxorder}', 'Dir*', 'Npix*.fits')):
+        if not os.path.exists(ratrootdir) and 'RAT' in products:
+
+            def innerdivide(fname_cts):
+                """Compute rate given count map."""
                 p = fname_cts.split('/')
-                fname_exp = os.path.join(outdirs[1], '/'.join(p[-3:]))
-                fname_rat = os.path.join(outrootdir, '/'.join(p[-3:]))
+                fname_exp = os.path.join(exprootdir, '/'.join(p[-3:]))
+                fname_rat = os.path.join(ratrootdir, '/'.join(p[-3:]))
                 os.makedirs(os.path.dirname(fname_rat), exist_ok=True)
 
                 print(fname_rat)
@@ -373,11 +376,19 @@ def main():
                 f1[0].data[:,:] = rat
                 f1.writeto(fname_rat, overwrite=True)
 
+            fnargs = (
+                (fname_cts,) for fname_cts in
+                glob.iglob(os.path.join(ctsrootdir, f'Norder{maxorder}', 'Dir*', 'Npix*.fits')) )
+
+            with forkqueue.ForkQueue(ordered=False, numforks=args.procs, env=locals()) as q:
+                for res in q.process(innerdivide, fnargs):
+                    pass
+
             # now make lower orders
             for i in range(maxorder,0,-1):
-                binupPixels(outrootdir, i, hdr_comments)
-            ensure0(outrootdir, maxorder, imgorder, hdr_comments)
-            makeAllsky(outrootdir, 3, imgorder)
+                binupPixels(ratrootdir, i, hdr_comments)
+            ensure0(ratrootdir, maxorder, imgorder, hdr_comments)
+            makeAllsky(ratrootdir, 3, imgorder)
 
 if __name__ == '__main__':
     main()
