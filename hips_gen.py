@@ -247,6 +247,7 @@ def ensure0(outrootdir, maxorder, imgorder, hdr_comments):
             h.makeHeader(pixel, hdu.header, comments=hdr_comments)
             ff = fits.HDUList([hdu])
             print('Writing', zerofn)
+            os.makedirs(os.path.dirname(zerofn), exist_ok=True)
             ff.writeto(zerofn)
 
     for order in range(maxorder+1):
@@ -370,11 +371,14 @@ def main():
                 os.makedirs(os.path.dirname(fname_rat), exist_ok=True)
 
                 print(fname_rat)
-                f1 = fits.open(fname_cts)
-                f2 = fits.open(fname_exp)
-                rat = (f1[0].data / f2[0].data).astype(N.float32)
-                f1[0].data[:,:] = rat
-                f1.writeto(fname_rat, overwrite=True)
+                try:
+                    f1 = fits.open(fname_cts)
+                    f2 = fits.open(fname_exp)
+                    rat = (f1[0].data / f2[0].data).astype(N.float32)
+                    f1[0].data[:,:] = rat
+                    f1.writeto(fname_rat, overwrite=True)
+                except FileNotFoundError:
+                    pass
 
             fnargs = (
                 (fname_cts,) for fname_cts in
